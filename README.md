@@ -15,6 +15,8 @@ A web-based frontend for the Ralph Wiggum technique - automated software develop
 - **Real-time Loop Monitoring**: Watch the Claude Code CLI output in real-time
 - **Progress Tracking**: Visual task checklist and progress indicators
 - **Dual View**: Toggle between raw terminal output and clean progress view
+- **E2E Testing** Supports End2End testing using Claude to generate tests and Playwright to execute
+- **Sanity Check** Uses Claude to check the generated codebase against the PRD to ensure compliance**
 
 ## Prerequisites
 
