@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local data (contains API keys and user settings)
+/data/
+
+# debug output files
+.review-debug-output.txt
