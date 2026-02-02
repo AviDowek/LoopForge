@@ -75,48 +75,82 @@ export class OpenAIProvider implements LLMProvider {
       hasReasoning: !!request.reasoningEffort && request.reasoningEffort !== 'none',
     }));
 
-    try {
-      console.log('[OpenAI] Making API request...');
-      const startTime = Date.now();
+    // Retry logic for empty responses (GPT-5.x can use all tokens for reasoning)
+    const MAX_RETRIES = 2;
 
-      const response = await this.client.chat.completions.create(completionRequest);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log('[OpenAI] Making API request...', attempt > 0 ? `(retry ${attempt})` : '');
+        const startTime = Date.now();
 
-      console.log('[OpenAI] Response received in', Date.now() - startTime, 'ms');
-      console.log('[OpenAI] Model used:', response.model);
-      console.log('[OpenAI] Usage:', response.usage);
+        const response = await this.client.chat.completions.create(completionRequest);
 
-      return {
-        content: response.choices[0].message.content || '',
-        usage: {
-          promptTokens: response.usage?.prompt_tokens || 0,
-          completionTokens: response.usage?.completion_tokens || 0,
-        },
-        model: response.model,
-        finishReason: response.choices[0].finish_reason || 'stop',
-      };
-    } catch (error) {
-      console.error('[OpenAI] API request failed:', error);
+        console.log('[OpenAI] Response received in', Date.now() - startTime, 'ms');
+        console.log('[OpenAI] Model used:', response.model);
+        console.log('[OpenAI] Usage:', response.usage);
 
-      // Extract detailed error info
-      const err = error as {
-        status?: number;
-        code?: string;
-        type?: string;
-        message?: string;
-        cause?: { cause?: { code?: string; socket?: unknown } };
-      };
+        const content = response.choices[0].message.content || '';
 
-      console.error('[OpenAI] Error details:', {
-        status: err.status,
-        code: err.code,
-        type: err.type,
-        message: err.message,
-        causeCode: err.cause?.cause?.code,
-        socket: err.cause?.cause?.socket,
-      });
+        // Check for empty response due to reasoning using all tokens
+        const usage = response.usage as {
+          completion_tokens?: number;
+          completion_tokens_details?: { reasoning_tokens?: number };
+        };
+        const completionTokens = usage?.completion_tokens || 0;
+        const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens || 0;
 
-      throw error;
+        if (!content.trim() && completionTokens > 0 && reasoningTokens >= completionTokens * 0.95) {
+          console.log('[OpenAI] WARNING: Empty response - all tokens used for reasoning');
+          console.log(`[OpenAI] Reasoning tokens: ${reasoningTokens}/${completionTokens}`);
+
+          if (attempt < MAX_RETRIES) {
+            console.log('[OpenAI] Retrying with explicit output instruction...');
+            // Add explicit instruction to output content
+            const lastUserMsg = messages.findLast(m => m.role === 'user');
+            if (lastUserMsg && typeof lastUserMsg.content === 'string') {
+              lastUserMsg.content = lastUserMsg.content + '\n\nIMPORTANT: You MUST provide a complete written response. Do not just think - output your answer.';
+            }
+            continue;
+          }
+        }
+
+        // If we have content or this is our last attempt, return
+        return {
+          content,
+          usage: {
+            promptTokens: response.usage?.prompt_tokens || 0,
+            completionTokens: response.usage?.completion_tokens || 0,
+          },
+          model: response.model,
+          finishReason: response.choices[0].finish_reason || 'stop',
+        };
+      } catch (error) {
+        console.error('[OpenAI] API request failed:', error);
+
+        // Extract detailed error info
+        const err = error as {
+          status?: number;
+          code?: string;
+          type?: string;
+          message?: string;
+          cause?: { cause?: { code?: string; socket?: unknown } };
+        };
+
+        console.error('[OpenAI] Error details:', {
+          status: err.status,
+          code: err.code,
+          type: err.type,
+          message: err.message,
+          causeCode: err.cause?.cause?.code,
+          socket: err.cause?.cause?.socket,
+        });
+
+        throw error;
+      }
     }
+
+    // If we exhausted retries without returning, throw an error
+    throw new Error('Failed to get response from OpenAI after retries');
   }
 
   async *streamChat(request: ChatRequest): AsyncIterable<ChatChunk> {
