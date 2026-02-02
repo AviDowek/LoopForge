@@ -14,6 +14,8 @@ import {
   Bot,
   ChevronDown,
   ChevronUp,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,6 +60,7 @@ export default function NewProjectPage() {
     setIsGenerating,
     generatedFiles,
     setGeneratedFiles,
+    updateFile,
     fileApprovals,
     setFileApproval,
     approveAllFiles,
@@ -69,8 +72,56 @@ export default function NewProjectPage() {
   const [changeRequest, setChangeRequest] = useState('');
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
 
+  // File regeneration state
+  const [regeneratingFile, setRegeneratingFile] = useState<string | null>(null);
+  const [regenerateContext, setRegenerateContext] = useState('');
+  const [showRegenerateModal, setShowRegenerateModal] = useState<string | null>(null);
+
   const toggleFileExpanded = (path: string) => {
     setExpandedFiles(prev => ({ ...prev, [path]: !prev[path] }));
+  };
+
+  const handleRegenerateFile = async (filePath: string, context?: string) => {
+    setRegeneratingFile(filePath);
+    try {
+      const file = generatedFiles.find(f => f.path === filePath);
+      if (!file) {
+        throw new Error('File not found');
+      }
+
+      const prdData = generatedPRD || prdContent;
+
+      const res = await fetch('/api/llm/regenerate-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filePath,
+          prd: prdData,
+          provider: selectedProvider,
+          context: context || undefined,
+          previousContent: file.content,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to regenerate file');
+      }
+
+      // Update the file content (also resets approval for this file only)
+      updateFile(filePath, data.content);
+
+      // Close modal and clear context
+      setShowRegenerateModal(null);
+      setRegenerateContext('');
+    } catch (error) {
+      console.error('Error regenerating file:', error);
+      const message = error instanceof Error ? error.message : 'Failed to regenerate file';
+      alert(message);
+    } finally {
+      setRegeneratingFile(null);
+    }
   };
 
   const handleProviderChange = (provider: LLMProvider) => {
@@ -406,6 +457,8 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                 const isExpanded = expandedFiles[file.path];
                 const contentPreview = file.content.slice(0, 500);
                 const hasMore = file.content.length > 500;
+                const isRegenerating = regeneratingFile === file.path;
+                const showModal = showRegenerateModal === file.path;
 
                 return (
                   <Card
@@ -425,6 +478,25 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
+                          {/* Regenerate button */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setShowRegenerateModal(showModal ? null : file.path)}
+                            disabled={isRegenerating}
+                          >
+                            {isRegenerating ? (
+                              <>
+                                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                Regenerating...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="mr-1 h-4 w-4" />
+                                Regenerate
+                              </>
+                            )}
+                          </Button>
                           <Button
                             size="sm"
                             variant="ghost"
@@ -446,6 +518,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                             size="sm"
                             variant={fileApprovals[file.path] ? 'default' : 'outline'}
                             onClick={() => setFileApproval(file.path, !fileApprovals[file.path])}
+                            disabled={isRegenerating}
                           >
                             {fileApprovals[file.path] ? (
                               <>
@@ -458,6 +531,60 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                           </Button>
                         </div>
                       </div>
+
+                      {/* Regenerate context input panel */}
+                      {showModal && (
+                        <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">Regenerate with context (optional)</span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0"
+                              onClick={() => {
+                                setShowRegenerateModal(null);
+                                setRegenerateContext('');
+                              }}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <Textarea
+                            placeholder="Add specific instructions for regeneration (e.g., 'Make it more detailed', 'Add error handling section', 'Focus on the authentication flow')..."
+                            value={regenerateContext}
+                            onChange={(e) => setRegenerateContext(e.target.value)}
+                            rows={2}
+                            className="text-sm"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handleRegenerateFile(file.path, regenerateContext)}
+                              disabled={isRegenerating}
+                            >
+                              {isRegenerating ? (
+                                <>
+                                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                  Regenerating...
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="mr-1 h-4 w-4" />
+                                  Regenerate
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRegenerateFile(file.path)}
+                              disabled={isRegenerating || !!regenerateContext.trim()}
+                            >
+                              Quick Regenerate (no context)
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </CardHeader>
                     <CardContent className="py-3 pt-0">
                       <pre className={`text-xs bg-gray-50 dark:bg-gray-900 p-3 rounded overflow-x-auto whitespace-pre-wrap ${isExpanded ? 'max-h-[600px] overflow-y-auto' : 'max-h-40'}`}>

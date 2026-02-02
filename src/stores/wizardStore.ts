@@ -31,6 +31,7 @@ interface WizardStore {
   // Step 3-4: File generation
   generatedFiles: GeneratedFile[];
   setGeneratedFiles: (files: GeneratedFile[]) => void;
+  updateFile: (path: string, content: string) => void;
   fileApprovals: Record<string, boolean>;
   setFileApproval: (path: string, approved: boolean) => void;
   approveAllFiles: () => void;
@@ -82,6 +83,14 @@ export const useWizardStore = create<WizardStore>((set, get) => ({
     });
     set({ generatedFiles: files, fileApprovals: approvals });
   },
+  updateFile: (path, content) =>
+    set((state) => ({
+      generatedFiles: state.generatedFiles.map((f) =>
+        f.path === path ? { ...f, content } : f
+      ),
+      // Reset approval for this specific file only
+      fileApprovals: { ...state.fileApprovals, [path]: false },
+    })),
   setFileApproval: (path, approved) =>
     set((state) => ({
       fileApprovals: { ...state.fileApprovals, [path]: approved },
