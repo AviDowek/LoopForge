@@ -3,7 +3,7 @@ import type { LLMProvider, ChatRequest, ChatResponse, ChatChunk } from '../types
 
 // GPT-5.2 model configuration
 const DEFAULT_MODEL = 'gpt-5.2';
-const MAX_COMPLETION_TOKENS = 16384; // Conservative default, can go up to 128k
+const MAX_COMPLETION_TOKENS = 65536; // Very high limit - GPT-5.2 reasoning can consume a lot
 const DEFAULT_TIMEOUT = 300000; // 5 minutes timeout (GPT-5.2 reasoning can take time)
 
 export class OpenAIProvider implements LLMProvider {
@@ -76,10 +76,17 @@ export class OpenAIProvider implements LLMProvider {
     }));
 
     // Retry logic for empty responses (GPT-5.x can use all tokens for reasoning)
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 3;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
+        // On retries, increase token limit dramatically to leave room after reasoning
+        if (attempt > 0 && isGpt5) {
+          const newLimit = MAX_COMPLETION_TOKENS * (attempt + 1); // 65536, 131072, 196608...
+          console.log(`[OpenAI] Retry ${attempt}: Increasing max_completion_tokens to ${newLimit}`);
+          (completionRequest as unknown as Record<string, unknown>).max_completion_tokens = Math.min(newLimit, 128000);
+        }
+
         console.log('[OpenAI] Making API request...', attempt > 0 ? `(retry ${attempt})` : '');
         const startTime = Date.now();
 
@@ -92,31 +99,46 @@ export class OpenAIProvider implements LLMProvider {
         const content = response.choices[0].message.content || '';
 
         // Check for empty response due to reasoning using all tokens
-        const usage = response.usage as {
-          completion_tokens?: number;
-          completion_tokens_details?: { reasoning_tokens?: number };
-        };
-        const completionTokens = usage?.completion_tokens || 0;
-        const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens || 0;
+        if (isGpt5) {
+          const usage = response.usage as {
+            completion_tokens?: number;
+            completion_tokens_details?: { reasoning_tokens?: number };
+          };
+          const completionTokens = usage?.completion_tokens || 0;
+          const reasoningTokens = usage?.completion_tokens_details?.reasoning_tokens || 0;
 
-        if (!content.trim() && completionTokens > 0 && reasoningTokens >= completionTokens * 0.95) {
-          console.log('[OpenAI] WARNING: Empty response - all tokens used for reasoning');
-          console.log(`[OpenAI] Reasoning tokens: ${reasoningTokens}/${completionTokens}`);
+          if (!content.trim() && completionTokens > 0 && reasoningTokens >= completionTokens * 0.9) {
+            console.log('[OpenAI] WARNING: Empty response - reasoning used most tokens');
+            console.log(`[OpenAI] Reasoning tokens: ${reasoningTokens}/${completionTokens}`);
 
-          if (attempt < MAX_RETRIES) {
-            console.log('[OpenAI] Retrying with explicit output instruction...');
-            // Add explicit instruction to output content
-            const lastUserMsg = messages.findLast(m => m.role === 'user');
-            if (lastUserMsg && typeof lastUserMsg.content === 'string') {
-              lastUserMsg.content = lastUserMsg.content + '\n\nIMPORTANT: You MUST provide a complete written response. Do not just think - output your answer.';
+            if (attempt < MAX_RETRIES) {
+              continue;
             }
-            continue;
           }
         }
 
-        // If we have content or this is our last attempt, return
+        // If we have content, return it
+        if (content.trim()) {
+          return {
+            content,
+            usage: {
+              promptTokens: response.usage?.prompt_tokens || 0,
+              completionTokens: response.usage?.completion_tokens || 0,
+            },
+            model: response.model,
+            finishReason: response.choices[0].finish_reason || 'stop',
+          };
+        }
+
+        // Empty content but not due to reasoning - still retry
+        if (attempt < MAX_RETRIES) {
+          console.log('[OpenAI] Empty response, retrying...');
+          continue;
+        }
+
+        // Final attempt with empty content
         return {
-          content,
+          content: '',
           usage: {
             promptTokens: response.usage?.prompt_tokens || 0,
             completionTokens: response.usage?.completion_tokens || 0,

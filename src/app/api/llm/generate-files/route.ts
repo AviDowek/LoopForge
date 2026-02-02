@@ -180,11 +180,16 @@ The JSON structure must be:
       type: 'spec',
     });
 
-    // Generate epic spec files using LLM for richer content
+    // Generate epic spec files using LLM for richer content - IN PARALLEL
     const llm = createProvider(providerType, apiKey);
 
-    for (const epic of prdJson.epics) {
+    console.log(`[generate-files] Starting parallel generation of ${prdJson.epics.length} epic specs...`);
+    const startTime = Date.now();
+
+    // Generate all specs in parallel
+    const specPromises = prdJson.epics.map(async (epic) => {
       const epicSlug = epic.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      console.log(`[generate-files] Starting spec for ${epic.id}: ${epic.name}`);
 
       const specResponse = await llm.chat({
         systemPrompt: SPEC_SYSTEM_PROMPT,
@@ -212,15 +217,23 @@ Project Context:
 - Language: ${prdJson.meta.primary_language}
 - Tech Stack: ${Object.entries(prdJson.tech_stack).map(([k, v]) => `${k}: ${v}`).join(', ')}`,
         }],
-        maxTokens: 4096,
+        maxTokens: 8192, // Increased to avoid truncation
       });
 
-      files.push({
+      console.log(`[generate-files] Completed spec for ${epic.id}: ${specResponse.content.length} chars`);
+
+      return {
         path: `specs/${epic.id}-${epicSlug}.md`,
         content: specResponse.content,
-        type: 'spec',
-      });
-    }
+        type: 'spec' as const,
+      };
+    });
+
+    // Wait for all specs to complete
+    const specResults = await Promise.all(specPromises);
+    files.push(...specResults);
+
+    console.log(`[generate-files] All ${specResults.length} specs completed in ${((Date.now() - startTime) / 1000).toFixed(1)}s`);
 
     // Generate main PRD spec file
     files.push({

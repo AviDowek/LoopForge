@@ -274,7 +274,7 @@ Please incorporate the user's feedback while maintaining the spec document struc
   const response = await llm.chat({
     systemPrompt: SPEC_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userMessage }],
-    maxTokens: 4096,
+    maxTokens: 16384, // Higher limit for GPT-5.2 reasoning overhead
   });
 
   return response.content;
