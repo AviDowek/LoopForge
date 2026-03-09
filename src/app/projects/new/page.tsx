@@ -16,6 +16,7 @@ import {
   ChevronUp,
   RefreshCw,
   X,
+  Palette,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,14 +26,19 @@ import { Badge } from '@/components/ui/badge';
 import { WizardStepper } from '@/components/wizard/WizardStepper';
 import { useWizardStore } from '@/stores/wizardStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { DesignSystemPanel } from '@/components/design/DesignSystemPanel';
+import { DesignApprovalGrid } from '@/components/design/DesignApprovalGrid';
+import { useDesignOrchestration } from '@/hooks/useDesignOrchestration';
+import { generateDesignReferenceMd } from '@/lib/design/designPrompts';
 import type { LLMProvider, GeneratedFile } from '@/types';
 
 const steps = [
   { id: 0, title: 'Describe', description: 'Your project idea' },
   { id: 1, title: 'Review PRD', description: 'AI-generated requirements' },
-  { id: 2, title: 'Generate Files', description: 'Ralph Wiggum structure' },
-  { id: 3, title: 'Approve Files', description: 'Review each document' },
-  { id: 4, title: 'Launch', description: 'Start the loop' },
+  { id: 2, title: 'Design', description: 'Visual design system' },
+  { id: 3, title: 'Generate Files', description: 'Ralph Wiggum structure' },
+  { id: 4, title: 'Approve Files', description: 'Review each document' },
+  { id: 5, title: 'Launch', description: 'Start the loop' },
 ];
 
 export default function NewProjectPage() {
@@ -54,7 +60,6 @@ export default function NewProjectPage() {
     setGeneratedPRD,
     prdContent,
     setPRDContent,
-    prdApproved,
     setPRDApproved,
     isGenerating,
     setIsGenerating,
@@ -65,6 +70,12 @@ export default function NewProjectPage() {
     setFileApproval,
     approveAllFiles,
     resetWizard,
+    // Design state
+    designSystem,
+    designSystemApproved,
+    pageDesigns,
+    designApprovals,
+    consistencyResult,
   } = useWizardStore();
 
   const { llmProvider: defaultProvider, hasValidKey } = useSettingsStore();
@@ -76,6 +87,9 @@ export default function NewProjectPage() {
   const [regeneratingFile, setRegeneratingFile] = useState<string | null>(null);
   const [regenerateContext, setRegenerateContext] = useState('');
   const [showRegenerateModal, setShowRegenerateModal] = useState<string | null>(null);
+
+  // Design orchestration
+  const design = useDesignOrchestration();
 
   const toggleFileExpanded = (path: string) => {
     setExpandedFiles(prev => ({ ...prev, [path]: !prev[path] }));
@@ -109,10 +123,7 @@ export default function NewProjectPage() {
         throw new Error(data.error || 'Failed to regenerate file');
       }
 
-      // Update the file content (also resets approval for this file only)
       updateFile(filePath, data.content);
-
-      // Close modal and clear context
       setShowRegenerateModal(null);
       setRegenerateContext('');
     } catch (error) {
@@ -149,7 +160,6 @@ export default function NewProjectPage() {
       }
 
       setPRDContent(data.content);
-      // Store the JSON for file generation
       if (data.json) {
         setGeneratedPRD(data.json);
       }
@@ -185,7 +195,6 @@ export default function NewProjectPage() {
       }
 
       setPRDContent(data.content);
-      // Store the JSON for file generation
       if (data.json) {
         setGeneratedPRD(data.json);
       }
@@ -207,7 +216,6 @@ export default function NewProjectPage() {
   const handleGenerateFiles = async () => {
     setIsGenerating(true);
     try {
-      // Send the JSON object if available, otherwise fall back to markdown content
       const prdData = generatedPRD || prdContent;
 
       const res = await fetch('/api/llm/generate-files', {
@@ -257,11 +265,57 @@ export default function NewProjectPage() {
 
       const project = await projectRes.json();
 
-      // Write the generated files to the project
+      // Build complete file list including design files
+      const allFiles: GeneratedFile[] = [...generatedFiles];
+
+      // Add design files if they exist
+      if (designSystem) {
+        allFiles.push({
+          path: 'designs/design-system.json',
+          content: JSON.stringify(designSystem, null, 2),
+          type: 'design',
+        });
+      }
+
+      for (const page of pageDesigns) {
+        if (page.htmlContent) {
+          allFiles.push({
+            path: `designs/pages/${page.id}.html`,
+            content: page.htmlContent,
+            type: 'design',
+          });
+        }
+      }
+
+      // Add judge results for reference
+      if (pageDesigns.some(p => p.judgeResult)) {
+        allFiles.push({
+          path: 'designs/judge-results.json',
+          content: JSON.stringify(
+            pageDesigns.map(p => ({ pageId: p.id, pageName: p.name, ...p.judgeResult })),
+            null, 2
+          ),
+          type: 'design',
+        });
+      }
+
+      // Add DESIGN_REFERENCE.md
+      if (designSystem && pageDesigns.length > 0) {
+        allFiles.push({
+          path: 'DESIGN_REFERENCE.md',
+          content: generateDesignReferenceMd(
+            designSystem,
+            pageDesigns.map(p => ({ id: p.id, name: p.name }))
+          ),
+          type: 'design',
+        });
+      }
+
+      // Write all files to the project
       await fetch(`/api/projects/${project.id}/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files: generatedFiles }),
+        body: JSON.stringify({ files: allFiles }),
       });
 
       resetWizard();
@@ -276,6 +330,7 @@ export default function NewProjectPage() {
 
   const renderStep = () => {
     switch (currentStep) {
+      // Step 0: Describe
       case 0:
         return (
           <div className="space-y-6">
@@ -322,7 +377,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                     <Bot className="h-5 w-5" />
                     <div className="text-left">
                       <div className="font-medium">Claude</div>
-                      <div className="text-xs opacity-70">Opus 4.5</div>
+                      <div className="text-xs opacity-70">Opus 4.6</div>
                     </div>
                   </div>
                 </Button>
@@ -353,6 +408,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
           </div>
         );
 
+      // Step 1: Review PRD
       case 1:
         return (
           <div className="space-y-6">
@@ -368,7 +424,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
               </CardHeader>
               <CardContent>
                 <div className="text-xs text-gray-500 mb-2">
-                  {Math.round(prdContent.length / 1024 * 10) / 10} KB • Scroll to view full document
+                  {Math.round(prdContent.length / 1024 * 10) / 10} KB
                 </div>
                 <div className="prose prose-sm dark:prose-invert max-w-none max-h-[70vh] overflow-y-auto bg-gray-50 dark:bg-gray-900 p-4 rounded-lg">
                   <pre className="whitespace-pre-wrap text-sm">{prdContent}</pre>
@@ -409,7 +465,114 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
           </div>
         );
 
+      // Step 2: Design
       case 2:
+        return (
+          <div className="space-y-6">
+            {/* Design System Section */}
+            {!designSystem && !design.isGeneratingDesign && (
+              <div className="flex flex-col items-center justify-center py-12 space-y-6">
+                <Palette className="h-12 w-12 text-gray-400" />
+                <div className="text-center">
+                  <h3 className="text-lg font-medium">Generate Visual Designs</h3>
+                  <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-md">
+                    The AI will create a unique design system and page mockups for your project.
+                    Designs are iteratively refined by a judge agent for quality.
+                  </p>
+                </div>
+                <Button onClick={design.generateDesignSystem} size="lg">
+                  <Palette className="mr-2 h-5 w-5" />
+                  Generate Design System
+                </Button>
+              </div>
+            )}
+
+            {/* Generating design system loading */}
+            {!designSystem && design.isGeneratingDesign && design.phase === 'generating_system' && (
+              <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                <Loader2 className="h-12 w-12 animate-spin text-gray-400" />
+                <div className="text-center">
+                  <h3 className="text-lg font-medium">Generating Design System</h3>
+                  <p className="text-gray-500 dark:text-gray-400 mt-1">
+                    Creating color palette, typography, spacing, and more...
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Design System Panel */}
+            {designSystem && (
+              <DesignSystemPanel
+                designSystem={designSystem}
+                approved={designSystemApproved}
+                onApprove={design.approveDesignSystem}
+                onRegenerate={design.regenerateDesignSystem}
+                isRegenerating={design.phase === 'generating_system'}
+              />
+            )}
+
+            {/* Page Designs Grid */}
+            {designSystemApproved && pageDesigns.length > 0 && (
+              <DesignApprovalGrid
+                pageDesigns={pageDesigns}
+                designApprovals={designApprovals}
+                onApprove={design.approvePage}
+                onApproveAll={design.approveAllDesigns}
+                onRegenerate={design.regeneratePage}
+                isGenerating={design.isGeneratingDesign}
+                currentGeneratingPage={design.currentGeneratingPage}
+              />
+            )}
+
+            {/* Consistency Check Result */}
+            {consistencyResult && (
+              <div className={`p-4 rounded-lg border ${
+                consistencyResult.passed
+                  ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800'
+                  : 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800'
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge className={consistencyResult.passed ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}>
+                    Consistency: {consistencyResult.overallScore}/100
+                  </Badge>
+                  <span className="text-sm font-medium">
+                    {consistencyResult.passed ? 'Cross-page consistency check passed' : 'Some inconsistencies found'}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{consistencyResult.summary}</p>
+                {consistencyResult.issues.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {consistencyResult.issues.map((issue, i) => (
+                      <li key={i} className="text-xs text-gray-500">
+                        <Badge variant="outline" className="mr-1 text-xs">{issue.severity}</Badge>
+                        {issue.description} ({issue.pages.join(', ')})
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* Error display */}
+            {design.error && (
+              <div className="p-4 rounded-lg bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800">
+                <p className="text-sm text-red-700 dark:text-red-300">{design.error}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  onClick={designSystemApproved ? design.startPageGeneration : design.generateDesignSystem}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Retry
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+
+      // Step 3: Generate Files
+      case 3:
         return (
           <div className="flex flex-col items-center justify-center py-12 space-y-6">
             {isGenerating ? (
@@ -440,7 +603,8 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
           </div>
         );
 
-      case 3:
+      // Step 4: Approve Files
+      case 4:
         return (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -478,7 +642,6 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          {/* Regenerate button */}
                           <Button
                             size="sm"
                             variant="ghost"
@@ -532,7 +695,6 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                         </div>
                       </div>
 
-                      {/* Regenerate context input panel */}
                       {showModal && (
                         <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border space-y-3">
                           <div className="flex items-center justify-between">
@@ -550,7 +712,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
                             </Button>
                           </div>
                           <Textarea
-                            placeholder="Add specific instructions for regeneration (e.g., 'Make it more detailed', 'Add error handling section', 'Focus on the authentication flow')..."
+                            placeholder="Add specific instructions for regeneration..."
                             value={regenerateContext}
                             onChange={(e) => setRegenerateContext(e.target.value)}
                             rows={2}
@@ -603,7 +765,8 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
           </div>
         );
 
-      case 4:
+      // Step 5: Launch
+      case 5:
         return (
           <div className="flex flex-col items-center justify-center py-12 space-y-6">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
@@ -617,7 +780,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
               </p>
             </div>
             <div className="flex gap-4">
-              <Button variant="outline" onClick={() => setStep(3)}>
+              <Button variant="outline" onClick={() => setStep(4)}>
                 Review Files Again
               </Button>
               <Button size="lg" onClick={handleLaunchLoop}>
@@ -640,8 +803,10 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
       case 1:
         return prdContent && !isGenerating;
       case 2:
-        return generatedFiles.length > 0 && !isGenerating;
+        return design.designStepComplete;
       case 3:
+        return generatedFiles.length > 0 && !isGenerating;
+      case 4:
         return allFilesApproved;
       default:
         return true;
@@ -654,7 +819,7 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Create New Project</h1>
         <p className="text-gray-500 dark:text-gray-400 mt-1">
-          Set up a new Ralph Wiggum project in 5 easy steps
+          Set up a new Ralph Wiggum project in 6 steps
         </p>
       </div>
 
@@ -676,9 +841,13 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
           {currentStep === 0 ? 'Cancel' : 'Back'}
         </Button>
 
-        {currentStep < 4 && currentStep !== 2 && (
+        {currentStep < 5 && currentStep !== 2 && currentStep !== 3 && (
           <Button
-            onClick={currentStep === 0 ? handleGeneratePRD : currentStep === 1 ? handleApprovePRD : nextStep}
+            onClick={
+              currentStep === 0 ? handleGeneratePRD :
+              currentStep === 1 ? handleApprovePRD :
+              nextStep
+            }
             disabled={!canProceed()}
           >
             {isGenerating ? (
@@ -688,10 +857,20 @@ Example: An e-commerce platform with product listings, shopping cart, checkout w
               </>
             ) : (
               <>
-                {currentStep === 0 ? 'Generate PRD' : currentStep === 1 ? 'Approve & Continue' : 'Next'}
+                {currentStep === 0 ? 'Generate PRD' :
+                 currentStep === 1 ? 'Approve & Continue' :
+                 'Next'}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </>
             )}
+          </Button>
+        )}
+
+        {/* Design step: show Next only when designs are complete */}
+        {currentStep === 2 && design.designStepComplete && (
+          <Button onClick={nextStep}>
+            Next
+            <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         )}
       </div>

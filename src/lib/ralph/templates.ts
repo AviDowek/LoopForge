@@ -34,6 +34,13 @@ Read \`src/lib/\` for shared utilities and patterns.
 - Note reusable components
 - Identify patterns to follow
 
+## Phase 0e: Study the Design Reference
+If a \`designs/\` directory exists, study it before planning UI tasks:
+- Read \`designs/design-system.json\` for the complete design token system
+- Read \`DESIGN_REFERENCE.md\` for a summary of the design direction
+- Browse \`designs/pages/*.html\` for visual mockups of every screen
+- Factor these visual specs into your implementation plan — UI tasks should reference specific design mockups
+
 ## Phase 1: Gap Analysis
 Compare specs vs. existing code:
 - What specs are fully implemented?
@@ -89,6 +96,16 @@ Using parallel subagents, study existing code:
 - Don't assume - SEARCH the codebase
 - Understand existing patterns
 - Find related code to modify
+
+## Phase 0d: Study the Design Reference
+If a \`designs/\` directory exists, study it carefully before implementing any UI:
+- Read \`designs/design-system.json\` for the complete design token system (colors, typography, spacing, shadows, radii)
+- Read \`DESIGN_REFERENCE.md\` for a human-readable summary of the design direction
+- Browse \`designs/pages/*.html\` for full-page visual mockups of every screen
+- These mockups are the authoritative visual spec — your implementation MUST match them
+- Extract exact color values, font choices, spacing, and layout patterns from the design tokens
+- The HTML mockups show precise visual hierarchy, component styling, and responsive behavior
+- When implementing a page, open its corresponding mockup and replicate the design faithfully
 
 ## Phase 1: Select Task
 Identify the single highest-priority unchecked task from IMPLEMENTATION_PLAN.md.
@@ -163,6 +180,10 @@ src/
 ├── lib/             # Shared utilities (camelCase)
 └── types/           # TypeScript types
 specs/               # Requirement specifications
+designs/             # Visual design reference (if generated)
+├── design-system.json  # Design tokens (colors, typography, spacing)
+├── pages/           # HTML/CSS mockups per screen
+└── judge-results.json  # Design quality scores
 \`\`\`
 
 ## Codebase Patterns

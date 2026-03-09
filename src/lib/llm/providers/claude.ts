@@ -18,7 +18,7 @@ export class ClaudeProvider implements LLMProvider {
     }));
 
     const response = await this.client.messages.create({
-      model: request.model || 'claude-opus-4-5-20251101', // Opus 4.5
+      model: request.model || 'claude-opus-4-6',
       max_tokens: request.maxTokens || 4096,
       system: request.systemPrompt,
       messages,
@@ -44,7 +44,7 @@ export class ClaudeProvider implements LLMProvider {
     }));
 
     const stream = this.client.messages.stream({
-      model: request.model || 'claude-opus-4-5-20251101',
+      model: request.model || 'claude-opus-4-6',
       max_tokens: request.maxTokens || 4096,
       system: request.systemPrompt,
       messages,

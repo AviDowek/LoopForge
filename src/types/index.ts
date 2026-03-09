@@ -174,7 +174,7 @@ export interface WizardState {
 export interface GeneratedFile {
   path: string;
   content: string;
-  type: 'prompt' | 'spec' | 'plan' | 'config' | 'script';
+  type: 'prompt' | 'spec' | 'plan' | 'config' | 'script' | 'design';
 }
 
 // Review types
@@ -182,3 +182,6 @@ export * from './review';
 
 // E2E Visual Testing types
 export * from './e2e';
+
+// Design Agent types
+export * from './design';
